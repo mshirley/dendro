@@ -3,9 +3,11 @@ from pyspark.sql import SQLContext, Row
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
 import ujson as json
+import urllib2
+import time
 
 sc = SparkContext(appName="dendro")
-ssc = StreamingContext(sc, 120)
+ssc = StreamingContext(sc, 30)
 zkQuorum = "localhost"
 topic = "dendro"
 kvs = KafkaUtils.createStream(ssc, zkQuorum, "spark-streaming-consumer", {topic: 1})
@@ -15,6 +17,12 @@ def getSqlContextInstance(sparkContext):
         globals()['sqlContextSingletonInstance'] = SQLContext(sparkContext)
     return globals()['sqlContextSingletonInstance']
 
+def postToTsdb(key, value):
+    data = {"metric": "flow-ports", "timestamp": int(time.time()), "value": value, "tags":{"port":key}}
+    url = 'http://localhost:4242/api/put?detailed'
+    req = urllib2.Request(url, json.dumps(data), {'Content-Type': 'application/json'})
+    f = urllib2.urlopen(req)
+
 def process(time, rdd):
     total = 0
     print("========= %s =========" % str(time))
@@ -23,11 +31,11 @@ def process(time, rdd):
         lineDf = sqlContext.jsonRDD(rdd)
 	ports = lineDf.groupBy("port").count()
         for k, v in ports.collect():
-          total += v
-	  print k, v
+            print k, v
+	    postToTsdb(k,v) 
     except:
         pass
-    print total
+
 
 lines = kvs.map(lambda x: x[1])
 lines.foreachRDD(process)
