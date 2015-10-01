@@ -18,7 +18,7 @@ def getSqlContextInstance(sparkContext):
     return globals()['sqlContextSingletonInstance']
 
 def postToTsdb(key, value):
-    data = {"metric": "flow-ports", "timestamp": int(time.time()), "value": value, "tags":{"port":key}}
+    data = {"metric": "flow.ports", "timestamp": int(time.time()), "value": value, "tags":{"port":key}}
     url = 'http://localhost:4242/api/put?detailed'
     req = urllib2.Request(url, json.dumps(data), {'Content-Type': 'application/json'})
     f = urllib2.urlopen(req)
