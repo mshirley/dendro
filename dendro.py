@@ -2,43 +2,51 @@ from pyspark import SparkContext
 from pyspark.sql import SQLContext, Row
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
-import ujson as json
+import json
 import urllib2
 import time
 
-sc = SparkContext(appName="dendro")
-ssc = StreamingContext(sc, 30)
-zkQuorum = "localhost"
-topic = "dendro"
-kvs = KafkaUtils.createStream(ssc, zkQuorum, "spark-streaming-consumer", {topic: 1})
+options = {}
+
+options["rate"] = 30
+options["appName"] = "dendro"
+options["zkQuorum"] = "localhost"
+options["topic"] = "dendro"
+options["consumerId"] = "spark-streaming-consumer"
+options["metric"] = "port"
+options["tsdbPrefix"] = "threatflow.ports"
+options["url"] = "http://localhost:4242/api/put?detailed"
+options["tag"] = "port"
+
+sc = SparkContext(options["appName"])
+ssc = StreamingContext(sc, options["rate"])
+
+kvs = KafkaUtils.createStream(ssc, options["zkQuorum"], options["consumerId"], {options["topic"]: 1})
 
 def getSqlContextInstance(sparkContext):
     if ('sqlContextSingletonInstance' not in globals()):
         globals()['sqlContextSingletonInstance'] = SQLContext(sparkContext)
     return globals()['sqlContextSingletonInstance']
 
-def postToTsdb(key, value):
-    data = {"metric": "flow.ports", "timestamp": int(time.time()), "value": value, "tags":{"port":key}}
-    url = 'http://localhost:4242/api/put?detailed'
-    req = urllib2.Request(url, json.dumps(data), {'Content-Type': 'application/json'})
+def postToTsdb(key, value, options):
+    data = {"metric": options["metric"], "timestamp": int(time.time()), "value": value, "tags":{options["tag"]:key}}
+    req = urllib2.Request(options["url"], json.dumps(data), {'Content-Type': 'application/json'})
     f = urllib2.urlopen(req)
 
-def process(time, rdd):
-    total = 0
+def process(time, rdd, options):
     print("========= %s =========" % str(time))
     try:
         sqlContext = getSqlContextInstance(rdd.context)
         lineDf = sqlContext.jsonRDD(rdd)
-	ports = lineDf.groupBy("port").count()
-        for k, v in ports.collect():
+	  metrics = lineDf.groupBy(desc(options["metric"])).count()
+        for k, v in metrics.collect():
             print k, v
-	    postToTsdb(k,v) 
+	    postToTsdb(k,v,options) 
     except:
         pass
 
-
 lines = kvs.map(lambda x: x[1])
-lines.foreachRDD(process)
+lines.foreachRDD(process, options)
 
 ssc.start()
 ssc.awaitTermination()
